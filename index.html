@@ -150,7 +150,7 @@
 
         <div class="button-row">
             <button id="playBtn" onclick="playBabelTrack()">Play 30s Track</button>
-            <button id="stopBtn" onclick="stopAudio()" disabled>Stop</button>
+            <button id="stopBtn" onclick="stopAudio()" dg-disabled disabled>Stop</button>
             <button onclick="randomizeSeed()">Randomize</button>
         </div>
 
@@ -167,14 +167,14 @@
         let currentSource = null;
         let isPlaying = false;
 
-        // Simple mulberry32 pseudorandom number generator seeded by a string
+        // Use Math.abs on the hash to prevent negative values from breaking math logic
         function hashCode(str) {
             let hash = 0;
             for (let i = 0; i < str.length; i++) {
                 hash = (hash << 5) - hash + str.charCodeAt(i);
-                hash |= 0; // Convert to 32bit integer
+                hash |= 0; 
             }
-            return hash;
+            return Math.abs(hash);
         }
 
         function mulberry32(a) {
@@ -206,11 +206,9 @@
             document.getElementById("playBtn").disabled = true;
             document.getElementById("stopBtn").disabled = false;
 
-            // Initialize Audio Context
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             audioCtx = new AudioContext();
 
-            // Setup buffer parameters (Using 8,000 Hz sample rate for lightweight real-time generation)
             const sampleRate = 8000; 
             const durationSeconds = 30;
             const totalSamples = sampleRate * durationSeconds;
@@ -218,23 +216,29 @@
             const buffer = audioCtx.createBuffer(1, totalSamples, sampleRate);
             const channelData = buffer.getChannelData(0);
 
-            // Generate pseudo-harmonic structures mixed with entropy so it acts like "Babel noise"
-            // (Pure uniform white noise sounds like static; adding basic filtering/modulation logic mimics a chaotic acoustic space)
             let waveState = 0;
+            // Safe modulation frequency derived from positive seedNum
+            const modFreqDivisor = 200 + (seedNum % 500);
+
             for (let i = 0; i < totalSamples; i++) {
-                // Mix random samples with minor algorithmic feedback loops to simulate chaotic audio artifacts
                 let rawRandom = (rng() * 2) - 1;
-                waveState = waveState * 0.95 + rawRandom * 0.05; // Low-pass softening
+                waveState = waveState * 0.95 + rawRandom * 0.05; 
                 
-                // Introduce occasional rhythmic variations derived from seed parameters
-                let modulation = Math.sin(i / (200 + (seedNum % 500)));
+                let modulation = Math.sin(i / modFreqDivisor);
+                // Ensure healthy output range without zeroing out
                 channelData[i] = (waveState * 0.7) + (modulation * rawRandom * 0.3);
             }
 
-            // Play the buffer
+            // Create a GainNode to boost and control overall output volume safely
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.value = 0.8; // Set master volume to 80%
+
             currentSource = audioCtx.createBufferSource();
             currentSource.buffer = buffer;
-            currentSource.connect(audioCtx.destination);
+            
+            // Connect source through gain node to speakers
+            currentSource.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
             
             currentSource.onended = () => {
                 stopAudio();
