@@ -150,7 +150,7 @@
 
         <div class="button-row">
             <button id="playBtn" onclick="playBabelTrack()">Play 30s Track</button>
-            <button id="stopBtn" onclick="stopAudio()" dg-disabled disabled>Stop</button>
+            <button id="stopBtn" onclick="stopAudio()" disabled>Stop</button>
             <button onclick="randomizeSeed()">Randomize</button>
         </div>
 
@@ -167,7 +167,6 @@
         let currentSource = null;
         let isPlaying = false;
 
-        // Use Math.abs on the hash to prevent negative values from breaking math logic
         function hashCode(str) {
             let hash = 0;
             for (let i = 0; i < str.length; i++) {
@@ -195,7 +194,7 @@
             document.getElementById("seedInput").value = result;
         }
 
-        function playBabelTrack() {
+        async function playBabelTrack() {
             if (isPlaying) stopAudio();
 
             const seedText = document.getElementById("seedInput").value || "default";
@@ -206,8 +205,15 @@
             document.getElementById("playBtn").disabled = true;
             document.getElementById("stopBtn").disabled = false;
 
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            audioCtx = new AudioContext();
+            // Initialize or reuse AudioContext securely per browser policies
+            if (!audioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+            }
+            
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
 
             const sampleRate = 8000; 
             const durationSeconds = 30;
@@ -217,26 +223,37 @@
             const channelData = buffer.getChannelData(0);
 
             let waveState = 0;
-            // Safe modulation frequency derived from positive seedNum
             const modFreqDivisor = 200 + (seedNum % 500);
+
+            // Envelope window to eliminate harsh clicks/pops at start and end
+            const fadeInSamples = sampleRate * 0.05; // 50ms fade-in
+            const fadeOutSamples = sampleRate * 0.05; // 50ms fade-out
 
             for (let i = 0; i < totalSamples; i++) {
                 let rawRandom = (rng() * 2) - 1;
                 waveState = waveState * 0.95 + rawRandom * 0.05; 
                 
                 let modulation = Math.sin(i / modFreqDivisor);
-                // Ensure healthy output range without zeroing out
-                channelData[i] = (waveState * 0.7) + (modulation * rawRandom * 0.3);
+                let sampleVal = (waveState * 0.7) + (modulation * rawRandom * 0.3);
+
+                // Apply envelope smoothing
+                let envelope = 1.0;
+                if (i < fadeInSamples) {
+                    envelope = i / fadeInSamples;
+                } else if (i > totalSamples - fadeOutSamples) {
+                    envelope = (totalSamples - i) / fadeOutSamples;
+                }
+
+                channelData[i] = sampleVal * envelope;
             }
 
-            // Create a GainNode to boost and control overall output volume safely
+            // Create Master Gain Node for volume leveling
             const gainNode = audioCtx.createGain();
-            gainNode.gain.value = 0.8; // Set master volume to 80%
+            gainNode.gain.value = 0.8;
 
             currentSource = audioCtx.createBufferSource();
             currentSource.buffer = buffer;
             
-            // Connect source through gain node to speakers
             currentSource.connect(gainNode);
             gainNode.connect(audioCtx.destination);
             
@@ -258,13 +275,12 @@
                 currentSource.disconnect();
                 currentSource = null;
             }
-            if (audioCtx && audioCtx.state !== 'closed') {
-                audioCtx.close();
-            }
             isPlaying = false;
             document.getElementById("playBtn").disabled = false;
             document.getElementById("stopBtn").disabled = true;
-            document.getElementById("status").innerText = "Status: Ready";
+            if (document.getElementById("status").innerText.includes("Playing")) {
+                document.getElementById("status").innerText = "Status: Ready";
+            }
         }
     </script>
 </body>
